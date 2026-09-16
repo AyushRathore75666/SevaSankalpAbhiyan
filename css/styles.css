@@ -667,7 +667,9 @@ main {
 
 .field input[readonly] {
   background: var(--md-surface-low);
+  color: var(--md-on-surface);
   pointer-events: none;
+  cursor: not-allowed;
 }
 
 .field-area label.is-float,
@@ -848,6 +850,12 @@ main {
   cursor: pointer;
 }
 
+.photo-btn.is-disabled {
+  opacity: 0.45;
+  pointer-events: none;
+  cursor: not-allowed;
+}
+
 .sr-file {
   position: absolute;
   inset: 0;
@@ -928,11 +936,6 @@ main {
 
 @keyframes spin {
   to { transform: rotate(360deg); }
-}
-
-body.is-deep .field-blood,
-body.is-blood .field-deep {
-  display: none;
 }
 
 .success-card {

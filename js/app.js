@@ -1,5 +1,6 @@
 (function () {
   const SPLASH_MS = 2600;
+  const MIN_PHOTOS = 1;
   const MAX_PHOTOS = 3;
   const MONTHS = {
     en: ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"],
@@ -11,6 +12,11 @@
     ulbs: "https://urbangis.mp.gov.in/api/Plantation/GetUlb",
     wards: "https://urbangis.mp.gov.in/api/Plantation/GetWardByULB",
     insert: "https://urbangis.mp.gov.in/api/Seva/InsertSevaEvent"
+  };
+
+  const PROGRAM = {
+    deep: { programTypeId: 1, programTypeName: "दीप प्रज्वलन कार्यक्रम" },
+    blood: { programTypeId: 1, programTypeName: "रक्तदान शिविर" }
   };
 
   const state = {
@@ -67,7 +73,6 @@
       btn.setAttribute("aria-pressed", String(btn.dataset.lang === state.lang));
     });
 
-    fillSelects();
     refillLocationDropdowns();
     if ($("#eventDate").value) {
       $("#eventDateDisplay").value = formatDate($("#eventDate").value);
@@ -250,51 +255,6 @@
     }
   }
 
-  function fillSelects() {
-    const saved = {};
-    $$(".js-district").forEach((select) => {
-      saved[select.id] = select.value;
-      select.innerHTML = `<option value="" disabled selected></option>`;
-      DISTRICTS.forEach(([en, hi]) => {
-        const opt = document.createElement("option");
-        opt.value = en;
-        opt.textContent = state.lang === "hi" ? `${hi} (${en})` : `${en} (${hi})`;
-        select.appendChild(opt);
-      });
-      if (saved[select.id]) select.value = saved[select.id];
-    });
-
-    const gender = $("#gender");
-    const blood = $("#bloodGroup");
-    const genderVal = gender.value;
-    const bloodVal = blood.value;
-
-    gender.innerHTML = `<option value="" disabled selected></option>`;
-    [["male", "gender.male"], ["female", "gender.female"], ["other", "gender.other"]].forEach(([value, key]) => {
-      const opt = document.createElement("option");
-      opt.value = value;
-      opt.textContent = t(key);
-      gender.appendChild(opt);
-    });
-    if (genderVal) gender.value = genderVal;
-
-    blood.innerHTML = `<option value="" disabled selected></option>`;
-    ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"].forEach((g) => {
-      const opt = document.createElement("option");
-      opt.value = g;
-      opt.textContent = g;
-      blood.appendChild(opt);
-    });
-    if (bloodVal) blood.value = bloodVal;
-
-    ["preferredDate", "lastDonationDate"].forEach((id) => {
-      const input = $(`#${id}`);
-      if (!input) return;
-      if (id !== "lastDonationDate") input.min = todayISO();
-      input.max = "2026-12-31";
-    });
-  }
-
   function showScreen(name, { push = true } = {}) {
     $$(".screen").forEach((screen) => {
       const active = screen.dataset.screen === name;
@@ -314,42 +274,37 @@
     showScreen(prev, { push: false });
   }
 
-  function setFormCopy(eventType) {
-    $("#formTitle").textContent = eventType === "deep" ? t("form.titleDeep") : t("form.titleBlood");
+  function syncBloodParticipants() {
+    if (state.event !== "blood") return;
+    $("#participants").value = $("#diyaCount").value;
   }
 
-  function setDeepFieldsEnabled(enabled) {
-    $$(".field-deep input, .field-deep select, .field-deep textarea").forEach((el) => {
-      if (el.id === "ulb" || el.id === "ward") return;
-      el.disabled = !enabled;
-    });
-    $$(".field-blood input, .field-blood select, .field-blood textarea").forEach((el) => {
-      el.disabled = enabled;
-    });
-    if (!enabled) {
-      $("#ulb").disabled = true;
-      $("#ward").disabled = true;
-    } else {
-      $("#ulb").disabled = !$("#district").value;
-      $("#ward").disabled = !$("#ulb").value;
+  function setFormCopy(eventType) {
+    $("#formTitle").textContent = eventType === "deep" ? t("form.titleDeep") : t("form.titleBlood");
+    const diyaLabel = $('label[for="diyaCount"]');
+    if (diyaLabel) {
+      const key = eventType === "blood" ? "form.bloodUnits" : "form.diyaCount";
+      diyaLabel.setAttribute("data-i18n", key);
+      diyaLabel.textContent = t(key);
     }
+    const participants = $("#participants");
+    const isBlood = eventType === "blood";
+    participants.readOnly = isBlood;
+    participants.tabIndex = isBlood ? -1 : 0;
+    participants.setAttribute("aria-readonly", String(isBlood));
+    if (isBlood) syncBloodParticipants();
   }
 
   function openForm(eventType) {
     state.event = eventType;
     $("#eventType").value = eventType === "deep" ? "deep_prajwalit" : "blood_donation";
-    document.body.classList.toggle("is-deep", eventType === "deep");
-    document.body.classList.toggle("is-blood", eventType === "blood");
     $$(".event-card").forEach((card) => {
       card.classList.toggle("is-selected", card.dataset.event === eventType);
     });
     setFormCopy(eventType);
-    setDeepFieldsEnabled(eventType === "deep");
-    if (eventType === "deep") {
-      setEventDate();
-      captureLocation();
-      loadDistricts();
-    }
+    setEventDate();
+    captureLocation();
+    loadDistricts();
     showScreen("form");
   }
 
@@ -438,8 +393,10 @@
     });
     $("#photos").value = String(state.photos.length);
     const camera = $("#photoCamera");
+    const cameraLabel = $("#cameraBtnLabel");
     const full = state.photos.length >= MAX_PHOTOS;
     if (camera) camera.disabled = full;
+    if (cameraLabel) cameraLabel.classList.toggle("is-disabled", full);
   }
 
   function addPhoto(file) {
@@ -508,97 +465,53 @@
   }
 
   function validate() {
+    syncBloodParticipants();
     clearErrors();
     let ok = true;
 
-    if (state.event === "deep") {
-      if (!$("#district").value) {
-        setError("district", t("errors.district"));
-        ok = false;
-      }
-      if (!$("#ulb").value) {
-        setError("ulb", t("errors.ulb"));
-        ok = false;
-      }
-      if (!$("#ward").value) {
-        setError("ward", t("errors.ward"));
-        ok = false;
-      }
-      if (!$("#eventPlace").value.trim()) {
-        setError("eventPlace", t("errors.required"));
-        ok = false;
-      }
-      if (!$("#latitude").value || !$("#longitude").value) {
-        setError("latitude", t("errors.location"));
-        ok = false;
-      }
-      if ($("#organizer").value.trim().length < 3) {
-        setError("organizer", t("errors.name"));
-        ok = false;
-      }
-      if (!positiveInt($("#diyaCount").value)) {
-        setError("diyaCount", t("errors.number"));
-        ok = false;
-      }
-      if (!positiveInt($("#participants").value)) {
-        setError("participants", t("errors.number"));
-        ok = false;
-      }
-      if (!$("#remarks").value.trim()) {
-        setError("remarks", t("errors.required"));
-        ok = false;
-      }
-      if (state.photos.length < 1) {
-        setError("photos", t("errors.photos"));
-        ok = false;
-      }
-    } else {
-      const name = $("#fullName").value.trim();
-      if (!/^[\p{L}\p{M}][\p{L}\p{M}\s.'-]{1,79}$/u.test(name)) {
-        setError("fullName", t("errors.name"));
-        ok = false;
-      }
-      if (!/^[6-9]\d{9}$/.test($("#mobile").value.trim())) {
-        setError("mobile", t("errors.mobile"));
-        ok = false;
-      }
-      const email = $("#email").value.trim();
-      if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-        setError("email", t("errors.email"));
-        ok = false;
-      }
-      if (!$("#bloodDistrict").value) {
-        setError("bloodDistrict", t("errors.district"));
-        ok = false;
-      }
-      if (!$("#address").value.trim()) {
-        setError("address", t("errors.required"));
-        ok = false;
-      }
-      const age = Number($("#age").value);
-      if (!age || age < 18 || age > 65) {
-        setError("age", t("errors.age"));
-        ok = false;
-      }
-      if (!$("#gender").value) {
-        setError("gender", t("errors.required"));
-        ok = false;
-      }
-      if (!$("#bloodGroup").value) {
-        setError("bloodGroup", t("errors.required"));
-        ok = false;
-      }
-      const weight = Number($("#weightKg").value);
-      if (!weight || weight < 45) {
-        setError("weightKg", t("errors.weight"));
-        ok = false;
-      }
-      if (!$("#preferredDate").value) {
-        setError("preferredDate", t("errors.date"));
-        ok = false;
-      }
+    if (!$("#district").value) {
+      setError("district", t("errors.district"));
+      ok = false;
     }
-
+    if (!$("#ulb").value) {
+      setError("ulb", t("errors.ulb"));
+      ok = false;
+    }
+    if (!$("#ward").value) {
+      setError("ward", t("errors.ward"));
+      ok = false;
+    }
+    if (!$("#eventPlace").value.trim()) {
+      setError("eventPlace", t("errors.required"));
+      ok = false;
+    }
+    if (!$("#latitude").value || !$("#longitude").value) {
+      setError("latitude", t("errors.location"));
+      ok = false;
+    }
+    if ($("#organizer").value.trim().length < 3) {
+      setError("organizer", t("errors.name"));
+      ok = false;
+    }
+    if (!positiveInt($("#diyaCount").value)) {
+      setError("diyaCount", t("errors.number"));
+      ok = false;
+    }
+    if (!positiveInt($("#participants").value)) {
+      setError("participants", t("errors.number"));
+      ok = false;
+    }
+    if (!$("#remarks").value.trim()) {
+      setError("remarks", t("errors.required"));
+      ok = false;
+    }
+    if (state.photos.length < MIN_PHOTOS) {
+      setError("photos", t("errors.photos"));
+      ok = false;
+    } else if (state.photos.length > MAX_PHOTOS) {
+      setError("photos", t("errors.photosMax"));
+      ok = false;
+    }
     if (!$("#consent").checked) {
       setError("consent", t("errors.consent"));
       ok = false;
@@ -607,18 +520,6 @@
     const firstInvalid = $(".is-invalid input, .is-invalid select, .is-invalid textarea, #consent[aria-invalid='true']");
     if (firstInvalid && visible(firstInvalid)) firstInvalid.focus();
     return ok;
-  }
-
-  function payloadFromForm(form) {
-    const data = Object.fromEntries(new FormData(form).entries());
-    data.consent = form.consent.checked;
-    data.language = state.lang;
-    data.submittedAt = new Date().toISOString();
-    if (state.event === "deep") {
-      data.photos = state.photos.map((p) => p.file);
-      data.photoCount = state.photos.length;
-    }
-    return data;
   }
 
   function fileToDataUrl(file) {
@@ -662,30 +563,40 @@
     });
   }
 
+  function notNullText(value) {
+    const text = String(value ?? "").trim();
+    return text || "NA";
+  }
+
   async function photosToBase64() {
     const first = state.photos[0];
     const second = state.photos[1];
     const third = state.photos[2];
     return {
       photoUrl: first ? await compressPhoto(first.file) : "",
-      other1: second ? await compressPhoto(second.file) : "",
-      other2: third ? await compressPhoto(third.file) : ""
+      other1: second ? await compressPhoto(second.file) : "NA",
+      other2: third ? await compressPhoto(third.file) : "NA"
     };
   }
 
   function buildSevaPayload(photos) {
+    const program = PROGRAM[state.event] || PROGRAM.deep;
+    const unitCount = Number($("#diyaCount").value) || 0;
+    const participantCount = state.event === "blood"
+      ? unitCount
+      : (Number($("#participants").value) || 0);
     return {
       userId: 1,
-      programTypeId: 1,
-      programTypeName: "दीप प्रज्वलन कार्यक्रम",
+      programTypeId: program.programTypeId,
+      programTypeName: program.programTypeName,
       distCd: $("#district").value,
       ulbCd: $("#ulb").value,
       wardId: $("#ward").value,
       programDate: $("#eventDate").value,
       programLocation: $("#eventPlace").value.trim(),
       organizerId: 1,
-      totalDiyaCount: Number($("#diyaCount").value) || 0,
-      totalParticipantCount: Number($("#participants").value) || 0,
+      totalDiyaCount: unitCount,
+      totalParticipantCount: participantCount,
       specialDetails: $("#remarks").value.trim(),
       latitude: Number($("#latitude").value) || 0,
       longitude: Number($("#longitude").value) || 0,
@@ -693,9 +604,12 @@
       userMobileNo: "1111111111",
       orgName: $("#organizer").value.trim(),
       depName: "NA",
-      photoUrl: photos.photoUrl,
-      other1: photos.other1,
-      other2: photos.other2
+      photoUrl: notNullText(photos.photoUrl),
+      other1: notNullText(photos.other1),
+      other2: notNullText(photos.other2),
+      other3: "NA",
+      other4: "NA",
+      other5: "NA"
     };
   }
 
@@ -723,7 +637,6 @@
       state.successTimer = null;
     }
     state.history = ["home", "events"];
-    document.body.classList.remove("is-deep", "is-blood");
     showScreen("events", { push: false });
   }
 
@@ -742,12 +655,6 @@
     state.successTimer = window.setTimeout(goToEventSelect, 2800);
   }
 
-  async function submitRegistration(payload) {
-    await new Promise((resolve) => setTimeout(resolve, 700));
-    const id = "SSA-2026-" + String(Math.floor(100000 + Math.random() * 900000));
-    return { ok: true, id, payload };
-  }
-
   async function onSubmit(event) {
     event.preventDefault();
     if (!validate()) return;
@@ -759,20 +666,13 @@
     if (label) label.textContent = t("form.submitting");
 
     try {
-      if (state.event === "deep") {
-        const photos = await photosToBase64();
-        if (!photos.photoUrl) throw new Error(t("errors.photos"));
-        const result = await insertSevaEvent(buildSevaPayload(photos));
-        event.target.reset();
-        resetDeepExtras();
-        const reference = result.data?.id || result.data?.eventId || result.data || result.message;
-        showThankYou(typeof reference === "string" || typeof reference === "number" ? String(reference) : "");
-      } else {
-        const result = await submitRegistration(payloadFromForm(event.target));
-        if (!result.ok) throw new Error("Submit failed");
-        event.target.reset();
-        showThankYou(result.id);
-      }
+      const photos = await photosToBase64();
+      if (!photos.photoUrl) throw new Error(t("errors.photos"));
+      const result = await insertSevaEvent(buildSevaPayload(photos));
+      event.target.reset();
+      resetDeepExtras();
+      const reference = result.data?.id || result.data?.eventId || result.data || result.message;
+      showThankYou(typeof reference === "string" || typeof reference === "number" ? String(reference) : "");
     } catch (err) {
       showToast(err.message || t("errors.submit"));
     } finally {
@@ -819,13 +719,15 @@
     $("#eventForm").addEventListener("submit", onSubmit);
     $("#successHome").addEventListener("click", goToEventSelect);
     $("#splashSkip").addEventListener("click", leaveSplash);
-    $("#mobile").addEventListener("input", (e) => {
-      e.target.value = e.target.value.replace(/\D/g, "").slice(0, 10);
-    });
     $("#diyaCount").addEventListener("input", (e) => {
       e.target.value = e.target.value.replace(/\D/g, "");
+      syncBloodParticipants();
     });
     $("#participants").addEventListener("input", (e) => {
+      if (state.event === "blood") {
+        syncBloodParticipants();
+        return;
+      }
       e.target.value = e.target.value.replace(/\D/g, "");
     });
     $("#captureLocationBtn").addEventListener("click", captureLocation);
